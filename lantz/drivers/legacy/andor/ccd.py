@@ -17,19 +17,18 @@
 
         - Andor SDK 2.96 Manual
 
-    :copyright: 2015 by Lantz Authors, see AUTHORS for more details.
+    :copyright: 2016 by Lantz Authors, see AUTHORS for more details.
     :license: BSD, see LICENSE for more details.
 """
 import numpy as np
 import ctypes as ct
 from collections import namedtuple
 
-from lantz import Driver, Feat, Action, DictFeat
+from lantz import Feat, Action, DictFeat
 from lantz.errors import InstrumentError
 from lantz.foreign import LibraryDriver
 from lantz import Q_
 
-degC = Q_(1, 'degC')
 us = Q_(1, 'us')
 MHz = Q_(1, 'MHz')
 seg = Q_(1, 's')
@@ -50,7 +49,7 @@ _ERRORS = {
     20014: 'DRV_ERROR_UP_FIFO',
     20015: 'DRV_ERROR_PATTERN',
     20017: 'DRV_ACQUISITION_ERRORS',
-    20018: 'Computer unable to read the data via the ISA slot at the required rate.',
+    20018: 'PC unable to read the data via the ISA slot at the required rate.',
     20019: 'DRV_ACQ_DOWNFIFO_FULL',
     20020: 'RV_PROC_UNKNOWN_INSTRUCTION',
     20021: 'DRV_ILLEGAL_OP_CODE',
@@ -114,6 +113,7 @@ _ERRORS = {
     20121: 'DRV_ERROR_NOHANDLE',
     20130: 'DRV_GATING_NOT_AVAILABLE',
     20131: 'DRV_FPGA_VOLTAGE_ERROR',
+    20099: 'DRV_BINNING_ERROR',
     20100: 'DRV_INVALID_AMPLIFIER',
     20101: 'DRV_INVALID_COUNTCONVERT_MODE'
 }
@@ -171,10 +171,14 @@ class CCD(LibraryDriver):
         self.frame_transfer_mode_state = False
         self.frame_transfer_mode = self.frame_transfer_mode_state
 
+        self.crop_mode_state = False
+        self.crop_mode_shape = self.detector_shape
+        self.crop_mode_binning = (1, 1)
+
         self.fan_mode_index = 'onfull'
         self.fan_mode = self.fan_mode_index
 
-        self.EM_gain_mode_index = 'DAC255'
+        self.EM_gain_mode_index = 'RealGain'
         self.EM_gain_mode = self.EM_gain_mode_index
 
         self.cooled_on_shutdown_value = False
@@ -200,7 +204,7 @@ class CCD(LibraryDriver):
         self.preamp_index = 0
         self.preamp = self.preamp_index
 
-        self.temperature_sp = 0 * degC
+        self.temperature_sp = 0
         self.temperature_setpoint = self.temperature_sp
 
         self.auxout = np.zeros(4, dtype=bool)
@@ -219,7 +223,7 @@ class CCD(LibraryDriver):
         self.free_int_mem()
         self.lib.ShutDown()
 
-    ### SYSTEM INFORMATION
+    # SYSTEM INFORMATION
 
     @Feat(read_once=True)
     def ncameras(self):
@@ -403,7 +407,7 @@ class CCD(LibraryDriver):
         else:
             return False
 
-    ### SHUTTER     # I couldn't find a better way to do this... sorry
+    # SHUTTER     # I couldn't find a better way to do this... sorry
     @Action()
     def shutter(self, typ, mode, ext_closing, ext_opening, ext_mode):
         """ This function expands the control offered by SetShutter to allow an
@@ -434,12 +438,6 @@ class CCD(LibraryDriver):
                 5 Open for any series
             int closingtime: time shutter takes to close (milliseconds)
             int openingtime: Time shutter takes to open (milliseconds)
-            int mode:
-                0 Fully Auto
-                1 Permanently Open
-                2 Permanently Closed
-                4 Open for FVB series
-                5 Open for any series
         """
         self.lib.SetShutterEx(ct.c_int(typ), ct.c_int(mode),
                               ct.c_int(ext_closing), ct.c_int(ext_opening),
@@ -460,9 +458,9 @@ class CCD(LibraryDriver):
         self.lib.IsInternalMechanicalShutter(ct.pointer(state))
         return bool(state.value)
 
-    ### TEMPERATURE
+    # TEMPERATURE (EVERYTHING IS IN DEGC)
 
-    @Feat(read_once=True, units='degC')
+    @Feat(read_once=True)
     def min_temperature(self):
         """ This function returns the valid range of temperatures in centigrads
         to which the detector can be cooled.
@@ -471,7 +469,7 @@ class CCD(LibraryDriver):
         self.lib.GetTemperatureRange(ct.pointer(mini), ct.pointer(maxi))
         return mini.value
 
-    @Feat(read_once=True, units='degC')
+    @Feat(read_once=True)
     def max_temperature(self):
         """ This function returns the valid range of temperatures in centigrads
         to which the detector can be cooled.
@@ -489,16 +487,16 @@ class CCD(LibraryDriver):
         ans = self.lib.GetTemperatureF(ct.pointer(temp))
         return _ERRORS[ans]
 
-    @Feat(units='degC')
+    @Feat()
     def temperature(self):
         """ This function returns the temperature of the detector to the
-        nearest degree. It also gives the status of cooling process.
+        nearest celsius degree. It also gives the status of cooling process.
         """
         temp = ct.c_float()
         self.lib.GetTemperatureF(ct.pointer(temp))
         return temp.value
 
-    @Feat(units='degC')
+    @Feat()
     def temperature_setpoint(self):
         return self.temperature_sp
 
@@ -552,7 +550,7 @@ class CCD(LibraryDriver):
         if ans == 20002:
             self.fan_mode_index = mode
 
-    ### FILTERS
+    # FILTERS
 
     @Feat()
     def averaging_factor(self):
@@ -649,7 +647,7 @@ class CCD(LibraryDriver):
     def cr_filter_enabled(self, value):
         self.lib.SetFilterMode(ct.c_int(value))
 
-    ### PHOTON COUNTING MODE
+    # PHOTON COUNTING MODE
 
     @Feat(values={True: 1, False: 0})   # FIXME: untested
     def photon_counting_mode(self):
@@ -688,7 +686,7 @@ class CCD(LibraryDriver):
         """
         self.lib.SetPhotonCountingThreshold(ct.c_long(mini), ct.c_long(maxi))
 
-    ### FAST KINETICS MODE
+    # FAST KINETICS MODE
 
     @Feat(units='s')
     def FK_exposure_time(self):
@@ -702,7 +700,7 @@ class CCD(LibraryDriver):
         self.lib.GetFKExposureTime(ct.pointer(f))
         return f.value
 
-    ### ACQUISITION HANDLING
+    # ACQUISITION HANDLING
 
     @Feat(values={'Single Scan': 1, 'Accumulate': 2, 'Kinetics': 3,
                   'Fast Kinetics': 4, 'Run till abort': 5})
@@ -917,7 +915,7 @@ class CCD(LibraryDriver):
         if ans == 20002:
             self.readout_packing_state = state
 
-    ### DATA HANDLING
+    # DATA HANDLING
 
     @Feat(read_once=True)
     def min_image_length(self):
@@ -960,7 +958,7 @@ class CCD(LibraryDriver):
         large enough to hold the complete data set.
         """
         size = np.array(shape).prod()
-        arr = np.ascontiguousarray(np.zeros(size, dtype=np.int16))
+        arr = np.ascontiguousarray(np.zeros(size, dtype=np.uint16))
         self.lib.GetAcquiredData16(arr.ctypes.data_as(ct.POINTER(ct.c_int16)),
                                    ct.c_ulong(size))
         return arr.reshape(shape)
@@ -982,7 +980,7 @@ class CCD(LibraryDriver):
         """ 16-bit version of the GetOldestImage function.
         """
         size = np.array(shape).prod()
-        array = np.ascontiguousarray(np.zeros(size, dtype=np.int16))
+        array = np.ascontiguousarray(np.zeros(size, dtype=np.uint16))
         self.lib.GetOldestImage16(array.ctypes.data_as(ct.POINTER(ct.c_int16)),
                                   ct.c_ulong(size))
         return array.reshape(shape)
@@ -1003,7 +1001,7 @@ class CCD(LibraryDriver):
         """ 16-bit version of the GetMostRecentImage function.
         """
         size = np.array(shape).prod()
-        arr = np.ascontiguousarray(np.zeros(size, dtype=np.int16))
+        arr = np.ascontiguousarray(np.zeros(size, dtype=np.uint16))
         pt = ct.POINTER(ct.c_int16)
         self.lib.GetMostRecentImage16(arr.ctypes.data_as(pt), ct.c_ulong(size))
         return arr.reshape(shape)
@@ -1034,7 +1032,7 @@ class CCD(LibraryDriver):
         """ 16-bit version of the GetImages function.
         """
         size = shape[0] * shape[1] * (1 + last - first)
-        array = np.ascontiguousarray(np.zeros(size, dtype=np.int16))
+        array = np.ascontiguousarray(np.zeros(size, dtype=np.uint16))
         self.lib.GetImages16(ct.c_long(first), ct.c_long(last),
                              array.ctypes.data_as(ct.POINTER(ct.c_int16)),
                              ct.c_ulong(size),
@@ -1124,7 +1122,7 @@ class CCD(LibraryDriver):
         self.lib.SaveAsRaw(ct.c_char_p(str.encode(filename)),
                            ct.c_int(self.savetypes[typ]))
 
-    ### EXPOSURE SETTINGS
+    # EXPOSURE SETTINGS
 
     @Feat()
     def acquisition_timings(self):
@@ -1144,7 +1142,7 @@ class CCD(LibraryDriver):
         kine = ct.c_float()
         self.lib.GetAcquisitionTimings(ct.pointer(exp), ct.pointer(accum),
                                        ct.pointer(kine))
-        return exp.value, accum.value, kine.value
+        return exp.value * seg, accum.value * seg, kine.value * seg
 
     @Action()
     def set_exposure_time(self, time):
@@ -1278,7 +1276,29 @@ class CCD(LibraryDriver):
         if ans == 20002:
             self.frame_transfer_mode_state = state
 
-    ### AMPLIFIERS, GAIN, SPEEDS
+    @Feat(values={True: 1, False: 0})
+    def crop_mode(self):
+        """ This function effectively reduces the dimensions of the CCD by
+        excluding some rows or columns to achieve higher throughput. In
+        isolated crop mode iXon, Newton and iKon cameras can operate in either
+        Full Vertical Binning or Imaging read modes. iDus can operate in Full
+        Vertical Binning read mode only.
+        Note: It is important to ensure that no light falls on the excluded
+        region otherwise the acquired data will be corrupted.
+        """
+        return self.crop_mode_state
+
+    @crop_mode.setter
+    def crop_mode(self, state):
+        ans = self.lib.SetIsolatedCropMode(ct.c_int(state),
+                                           ct.c_int(self.crop_mode_shape[1]),
+                                           ct.c_int(self.crop_mode_shape[0]),
+                                           ct.c_int(self.crop_mode_binning[1]),
+                                           ct.c_int(self.crop_mode_binning[0]))
+        if ans == 20002:
+            self.crop_mode_state = state
+
+    # AMPLIFIERS, GAIN, SPEEDS
 
     @Feat(read_once=True)
     def n_preamps(self):
@@ -1330,7 +1350,7 @@ class CCD(LibraryDriver):
         index = ct.c_int(index)
         gain = ct.c_float()
         self.lib.GetPreAmpGain(index, ct.pointer(gain))
-        return gain
+        return gain.value
 
     @Feat()
     def preamp(self):
@@ -1629,7 +1649,7 @@ class CCD(LibraryDriver):
         self.lib.GetNumberVSSpeeds(ct.pointer(n))
         return n.value
 
-    def true_vert_shift_speed(self, index=0):
+    def true_vert_shift_speed(self, index):
         """As your Andor SDK system may be capable of operating at more than
         one vertical shift speed this function will return the actual speeds
         available. The value returned is in microseconds.
@@ -1650,7 +1670,7 @@ class CCD(LibraryDriver):
         self.vert_shift_speed_index = index
         self.lib.SetVSSpeed(ct.c_int(index))
 
-    ### BASELINE
+    # BASELINE
 
     @Feat(values={True: 1, False: 0})
     def baseline_clamp(self):
@@ -1682,7 +1702,7 @@ class CCD(LibraryDriver):
         if ans == 20002:
             self.baseline_offset_value = value
 
-    ### BIT DEPTH
+    # BIT DEPTH
 
     def bit_depth(self, ch):
         """ This function will retrieve the size in bits of the dynamic range
@@ -1693,7 +1713,7 @@ class CCD(LibraryDriver):
         self.lib.GetBitDepth(ch, ct.pointer(depth))
         return depth.value
 
-    ### TRIGGER
+    # TRIGGER
 
     @Feat(values={True: 1, False: 0})
     def adv_trigger_mode(self):
@@ -1759,7 +1779,7 @@ class CCD(LibraryDriver):
         """
         self.lib.SetTriggerLevel(ct.c_float(value))
 
-    ### AUXPORT
+    # AUXPORT
 
     @DictFeat(values={True: not(0), False: 0}, keys=list(range(1, 5)))
     def in_aux_port(self, port):
@@ -1890,11 +1910,8 @@ class CCD(LibraryDriver):
         self.lib.AT_Flush(self.AT_H)
 
 if __name__ == '__main__':
-    from matplotlib import pyplot as plt
     from lantz import Q_
-    import time
 
-    degC = Q_(1, 'degC')
     us = Q_(1, 'us')
     MHz = Q_(1, 'MHz')
     s = Q_(1, 's')
@@ -1912,12 +1929,20 @@ if __name__ == '__main__':
         andor.set_exposure_time(0.03 * s)
         andor.trigger_mode = 'Internal'
         andor.amp_typ = 0
-        andor.horiz_shift_speed = 0
+        andor.horiz_shift_speed = 3
         andor.vert_shift_speed = 0
-        andor.shutter(0, 0, 0, 0, 0)
+#        andor.shutter(0, 1, 0, 0, 0)
+        andor.preamp = 0
+        andor.EM_advanced_enabled = False
+        andor.EM_gain_mode = 'RealGain'
+        andor.set_n_accum(1)                 # No accumulation of exposures
+#        andor.set_accum_time(0 * s)         # Minimum accumulation and kinetic
+        andor.set_kinetic_cycle_time(0 * s)  # times
+        andor.frame_transfer_mode = True
+        andor.crop_mode = True
 
 #        # Temperature stabilization
-#        andor.temperature_setpoint = -30 * degC
+#        andor.temperature_setpoint = -30
 #        andor.cooler_on = True
 #        stable = 'Temperature has stabilized at set point.'
 #        print('Temperature set point =', andor.temperature_setpoint)
@@ -1927,13 +1952,22 @@ if __name__ == '__main__':
 #        print('Temperature has stabilized at set point')
 
         # Acquisition
-        andor.start_acquisition()
-        time.sleep(2)
-        data = andor.most_recent_image(shape=andor.detector_shape)
-        andor.abort_acquisition()
+#        andor.start_acquisition()
+#        time.sleep(2)
+#        shape = andor.detector_shape
+#        data = andor.most_recent_image(shape=shape)
+#
+#        i, j = andor.new_images_index
+#        n = j - i
+##        stack = np.zeros((n, shape[0], shape[1]),
+#
+#        stack = andor.images16(i, j, andor.detector_shape, 1, n)
+#
+#        andor.abort_acquisition()
+#        andor.shutter(0, 2, 0, 0, 0)
 
-        plt.imshow(data, cmap='gray', interpolation='None')
-        plt.colorbar()
-        plt.show()
+#        plt.imshow(data, cmap='gray', interpolation='None')
+#        plt.colorbar()
+#        plt.show()
 
-        print(data.min(), data.max(), data.mean())
+#        print(data.min(), data.max(), data.mean())

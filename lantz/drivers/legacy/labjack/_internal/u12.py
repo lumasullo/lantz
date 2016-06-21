@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Name: u12.py
 Desc: Defines the U12 class, which makes working with a U12 much easier. The 
@@ -2530,7 +2529,7 @@ class U12(object):
         
         >>> dev = U12()
         >>> dev.getWinVersion()
-        >>> {'majorVersion': 5, 'minorVersion': 1, 'platformID': 2, 'buildNumber': 2600, 'servicePackMajor': 2, 'servicePackMinor': 0}
+        >>> {'majorVersion': 5L, 'minorVersion': 1L, 'platformID': 2L, 'buildNumber': 2600L, 'servicePackMajor': 2L, 'servicePackMinor': 0L}
         """
         
         # Create ctypes
