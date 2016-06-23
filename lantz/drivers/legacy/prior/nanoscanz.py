@@ -1,206 +1,93 @@
 # -*- coding: utf-8 -*-
 """
-    lantz.drivers.legacy.prior.nanoscanz
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Created on Tue Nov 18 10:42:38 2014
 
-    :copyright: 2015 by Lantz Authors, see AUTHORS for more details.
-    :license: BSD, see LICENSE for more details.
+@author: Usuario
 """
 
-from lantz import Action, Feat
-from lantz.drivers.legacy.serial import SerialDriver
-from lantz.errors import InstrumentError
-
-class NanoScanZ(SerialDriver):
-    """Driver for the NanoScanZ Nano Focusing Piezo Stage from Prior.
-    """
-
-    ENCODING = 'ascii'
-    
-    RECV_TERMINATION = '\r'
-    SEND_TERMINATION = '\r'
-    
-    BAUDRATE = 9600
-    BYTESIZE = 8
-    PARITY = 'none'
-    STOPBITS = 1
-
-    #: flow control flags
-    RTSCTS = False
-    DSRDTR = False
-    XONXOFF = False
-
-    
-    def query(self, command, *, send_args=(None, None), recv_args=(None, None)):
-        """Send query to the stage and return the answer, after handling
-        possible errors.
-
-        :param command: command to be sent to the instrument
-        :type command: string
-
-        :param send_args: (termination, encoding) to override class defaults
-        :param recv_args: (termination, encoding) to override class defaults
-        """
-        ans = super().query(command, send_args=send_args, recv_args=recv_args)
-        if ans[0] == 'E':
-            code = ans[2]
-            if code == '8':
-                raise InstrumentError('Value out of range')
-            elif code == '4':
-                raise InstrumentError('Command parse error, ie wrong number  of parameters')
-            elif code == '5':
-                raise InstrumentError('Unknown command')
-            elif code == '2':
-                raise InstrumentError('Invalid checksum')
-
-        return ans
-    
-    @Feat(values={9600,19200,38400})
-    def baudrate(self):
-        """Reports and sets the baud rate.
-        NOTE: DO NOT change the baud rate of the Piezo controller when daisy chained to ProScan.
-        """
-        return self.query('BAUD')
-
-    @baudrate.setter
-    def baudrate(self, value):
-        self.query('BAUD {}'.format(value))
+import comtypes.client as com
+from lantz import Driver, Feat, Action
 
 
-    @Feat(values={True: '4', False: '00000'})
-    def moving(self):
-        """Returns the movement status, 0 stationary, 4 moving
-        """
-        return self.query('$')
-    
-    @Feat(read_once=True)
-    def idn(self):
-        """Identification of the device
-        """
-        return self.query('DATE') +' '+ self.query('SERIAL')
-    
-    @Feat(units = 'micrometer')
+class NanoScanZ(Driver):
+
+    def __init__(self, port, *args, **kwargs):
+
+        self.lib = com.GetModule("Prior.dll")
+        self.port = port
+
+        self.controller = com.CreateObject(self.lib.Scan())
+        self.controller.Connect(self.port)
+        self.zobject = com.CreateObject(self.lib.Z())
+
+    @Feat(units='um', limits=(-10000, 10000))
     def position(self):
-        """Gets and sets current position.
-        If the value is set to z = 0, the display changes to REL 0 (relative display mode). To return to ABS mode use inst.move_absolute(0) and then inst.position = 0. Thus, the stage will return to 0 micrometers and the display screen will switch to ABS mode.
-        """
-        return self.query('PZ')
+        '''Gets and sets current position.
+        If the value is set to z = 0, the display changes to REL 0 (relative
+        display mode). To return to ABS mode use inst.move_absolute(0) and then
+        inst.position = 0. Thus, the stage will return to 0 micrometers and the
+        display screen will switch to ABS mode.
+        '''
+        return self.zobject.Position
 
     @position.setter
     def position(self, value):
-        self.query('PZ {}'.format(value))
-    
+        '''Gets and sets current position.
+        If the value is set to z = 0, the display changes to REL 0 (relative
+        display mode). To return to ABS mode use inst.move_absolute(0) and then
+        inst.position = 0. Thus, the stage will return to 0 micrometers and the
+        display screen will switch to ABS mode.
+        '''
+        self.zobject.MoveToAbsolute(value)
+
     @Action()
-    def zero_position(self):
-        """Move to zero including any position redefinitions done by the position Feat
-        """
-        self.query('M')
-    
-    
-    @Action(units = 'micrometer', limits=(100,))
-    def move_absolute(self, value):
-        """Move to absolute position n, range (0,100).
-        This is a "real" absolute position and is independent of any relative offset added by the position Feat.
-        """
-        self.query('V {}'.format())
-    
-    
-    @Action()
-    def move_relative(self, value):
-        """ 
-        Move the stage position relative to the current position by an amount determined by 'value'.
-        If value is given in micrometer, thats the amount the stage is going to move, in microns.
-        If value is given in steps, the stage will move a distance  value.magnitude * step. The step is defined by the step Feat
-        """
-        """
-    try:
-            u = value.units
-            if value.magnitude > 0:
-                self.query('U {}'.format(value.magnitude))
-            if value.magnitude < 0:
-                self.query('D {}'.format(-value.magnitude))
-        except:
-            if isinstance(value, int):
-                if value > 0:
-                    for x in range(0,value):
-                        self.query('U')
-                elif value < 0:
-                    for x in range(0,value):
-                        self.query('D')
-            else:
-                raise ValueError('Specify the translation distance in micrometer unit')               
-        """
+    def moveRelative(self, value):
         try:
-            if value.units == 'micrometer':
-                if value.magnitude > 0:
-                    self.query('U {}'.format(value.magnitude))
-                elif value.magnitude < 0:
-                    self.query('D {}'.format(-value.magnitude))
-            elif value.units == 'steps':
-                if value.magnitude > 0:
-                    for x in range(0,value.magnitude):
-                        self.query('U')
-                elif value.magnitude < 0:
-                    for x in range(0,-value.magnitude):
-                        self.query('D')
+            value.units
+            if value.to('um').magnitude > 0:
+                return self.zobject.MoveUp(value.to('um').magnitude)
+
+            else:
+                return self.zobject.MoveDown(-value.to('um').magnitude)
         except:
-            raise ValueError('Specify the translation distance in micrometers or steps') 
-    
+                if value > 0:
+                    return self.zobject.MoveUp(value)
 
-    @Feat(units='micrometer')
-    def step(self):
-        """Report and set the default step size, in microns
-        """
-        return self.query('C')
+                else:
+                    return self.zobject.MoveDown(-value)
 
-    @step.setter
-    def step (self, value):
-        self.query('C {}'.format(value))
-    
-    
-    
-    @Feat(read_once=True)
-    def software_version(self):
-        """Software version
-        """  
-        return self.query('VER')
+    @Feat()
+    def umPerRevolution(self):
+        return self.zobject.MicronsPerMotorRevolution
 
-class NanoScanZ_chained(NanoScanZ):
-    """This is needed when the NanoScanZ controller is connected to a ProScanII controller through its RS-232-2 input
-    """
-    def write(self, command, termination=None, encoding=None):
-        super().write('<' + command, termination=termination, encoding=encoding)
+    @umPerRevolution.setter
+    def umPerRevolution(self, value):
+        self.zobject.MicronsPerMotorRevolution = value
 
-    def read(self, termination=None, encoding=None, recv_chunk=None):
-        return super().read(termination=termination, encoding=encoding)[1:]
+    @Feat(values={'left': 1, 'right': -1})
+    def hostPosition(self):
+        return self.zobject.HostDirection
+
+    @hostPosition.setter
+    def hostPosition(self, value):
+        self.zobject.HostDirection = value
+
+    def finalize(self):
+        self.controller.DisConnect()
 
 
 if __name__ == '__main__':
-    import argparse
-    import lantz.log
 
-    parser = argparse.ArgumentParser(description='Test Prior NanoScanZ')
-    parser.add_argument('-i', '--interactive', action='store_true',
-                        default=False, help='Show interactive GUI')
-    parser.add_argument('-p', '--port', type=str, default='17',
-                        help='Serial port to connect to')
+    from lantz import Q_
 
-    args = parser.parse_args()
-    lantz.log.log_to_screen(lantz.log.DEBUG)
-    with NanoScanZ(args.port) as inst:
-        if args.interactive:
-            from lantz.ui.app import start_test_app
-            start_test_app(inst)
-        else:
-            from lantz import Q_
-            # Add your test code here
-            print('Non interactive mode')
-            
-            um = Q_(1, 'micrometer')
-            
-            print(inst.idn)
-            print(inst.moving)
-            print(inst.position)
-            print(inst.step)
-            inst.step = 1 * um
-            print(inst.step)
+    um = Q_(1, 'um')
+
+    aa = NanoScanZ(12)
+#
+#    with NanoScanZ(12) as nano:
+#        print(nano.position)
+#        nano.position = -650 * um
+#        print(nano.position)
+#        print(nano.hostPosition)
+#        nano.hostPosition = 'left'
+#        print(nano.hostPosition)
