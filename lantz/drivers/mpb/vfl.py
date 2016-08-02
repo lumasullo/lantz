@@ -19,8 +19,8 @@ class VFL(MessageBasedDriver):
 
     DEFAULTS = {'ASRL': {'write_termination': '\rD >',
                          'read_termination': '\r\n',
-                         'baud_rate': 1200,
-                         'bytesize': 8,
+                         'baud_rate': 9600,
+#                         'bytesize': 8,
                          'parity': constants.Parity.none,
                          'stop_bits': constants.StopBits.one,
                          'encoding': 'ascii',
@@ -197,7 +197,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     lantz.log.log_to_screen(lantz.log.DEBUG)
-    with VFL.from_serial_port(args.port) as inst:
+    with VFL('COM3') as inst:
         if args.interactive:
             from lantz.ui.qtwidgets import start_test_app
             start_test_app(inst)
@@ -206,3 +206,4 @@ if __name__ == '__main__':
             print('Non interactive mode')
             print(inst.idn)
             print(inst.shg_tuning)
+#

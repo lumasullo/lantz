@@ -9,10 +9,11 @@
 
     ----
 
-    :copyright: 2015 by Lantz Authors, see AUTHORS for more details.
+    :copyright: 2016 by Lantz Authors, see AUTHORS for more details.
     :license: BSD, see LICENSE for more details.
 """
 
 from .nanoscanz import NanoScanZ
+from .proscaniii import ProScanIII
 
-__all__ = ['NanoScanZ']
+__all__ = ['NanoScanZ', 'ProScanIII']
